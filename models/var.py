@@ -188,48 +188,36 @@ class VAR(nn.Module):
         return self.vae_proxy[0].fhat_to_img(f_hat).add_(1).mul_(0.5)   # de-normalize, from [-1, 1] to [0, 1]
     
     def forward(self, label_B: torch.LongTensor, x_BLCv_wo_first_l: torch.Tensor) -> torch.Tensor:  # returns logits_BLV
-        """
-        :param label_B: label_B
-        :param x_BLCv_wo_first_l: teacher forcing input (B, self.L-self.first_l, self.Cvae)
-        :return: logits BLV, V is vocab_size
-        """
-        bg, ed = self.begin_ends[self.prog_si] if self.prog_si >= 0 else (0, self.L)
-        B = x_BLCv_wo_first_l.shape[0]
-        with torch.cuda.amp.autocast(enabled=False):
-            label_B = torch.where(torch.rand(B, device=label_B.device) < self.cond_drop_rate, self.num_classes, label_B)
-            sos = cond_BD = self.class_emb(label_B)
-            sos = sos.unsqueeze(1).expand(B, self.first_l, -1) + self.pos_start.expand(B, self.first_l, -1)
-            
-            if self.prog_si == 0: x_BLC = sos
-            else: x_BLC = torch.cat((sos, self.word_embed(x_BLCv_wo_first_l.float())), dim=1)
-            x_BLC += self.lvl_embed(self.lvl_1L[:, :ed].expand(B, -1)) + self.pos_1LC[:, :ed] # lvl: BLC;  pos: 1LC
-        
-        attn_bias = self.attn_bias_for_masking[:, :, :ed, :ed]
-        cond_BD_or_gss = self.shared_ada_lin(cond_BD)
-        
-        # hack: get the dtype if mixed precision is used
-        temp = x_BLC.new_ones(8, 8)
-        main_type = torch.matmul(temp, temp).dtype
-        
-        x_BLC = x_BLC.to(dtype=main_type)
-        cond_BD_or_gss = cond_BD_or_gss.to(dtype=main_type)
-        attn_bias = attn_bias.to(dtype=main_type)
-        
-        AdaLNSelfAttn.forward
-        for i, b in enumerate(self.blocks):
-            x_BLC = b(x=x_BLC, cond_BD=cond_BD_or_gss, attn_bias=attn_bias)
-        x_BLC = self.get_logits(x_BLC.float(), cond_BD)
-        
-        if self.prog_si == 0:
-            if isinstance(self.word_embed, nn.Linear):
-                x_BLC[0, 0, 0] += self.word_embed.weight[0, 0] * 0 + self.word_embed.bias[0] * 0
-            else:
-                s = 0
-                for p in self.word_embed.parameters():
-                    if p.requires_grad:
-                        s += p.view(-1)[0] * 0
-                x_BLC[0, 0, 0] += s
-        return x_BLC    # logits BLV, V is vocab_size
+        B, L_minus_first, Cvae = x_BLCv_wo_first_l.shape  # Unpack shape
+
+        # Ensure label shape
+        label_B = torch.where(torch.rand(B, device=label_B.device) < self.cond_drop_rate, self.num_classes, label_B)
+    
+        # Class embedding
+        sos = self.class_emb(label_B)
+        sos = sos.unsqueeze(1).expand(B, self.first_l, -1) + self.pos_start.expand(B, self.first_l, -1)
+
+        # 🔹 Reshape input tensor before Linear layer
+        x_BLCv_wo_first_l = x_BLCv_wo_first_l.view(B * L_minus_first, Cvae)  # Flatten for Linear layer
+        x_BLCv_wo_first_l = self.word_embed(x_BLCv_wo_first_l)   # Pass through Linear layer
+        x_BLCv_wo_first_l = x_BLCv_wo_first_l.view(B, L_minus_first, self.C)  # Reshape back
+
+        # Concatenate
+        x_BLC = torch.cat((sos, x_BLCv_wo_first_l), dim=1)
+        x_BLC += self.lvl_embed(self.lvl_1L[:, :self.L].expand(B, -1)) + self.pos_1LC[:, :self.L]
+
+        attn_bias = self.attn_bias_for_masking[:, :, :self.L, :self.L]
+        cond_BD_or_gss = self.shared_ada_lin(sos)
+
+        # Attention Block
+        x_BLC = x_BLC.to(dtype=self.head.weight.dtype)
+        cond_BD_or_gss = cond_BD_or_gss.to(dtype=self.head.weight.dtype)
+        attn_bias = attn_bias.to(dtype=self.head.weight.dtype)
+
+        for block in self.blocks:
+            x_BLC = block(x=x_BLC, cond_BD=cond_BD_or_gss, attn_bias=attn_bias)
+
+        return self.get_logits(x_BLC, cond_BD_or_gss)
     
     def init_weights(self, init_adaln=0.5, init_adaln_gamma=1e-5, init_head=0.02, init_std=0.02, conv_std_or_gain=0.02):
         if init_std < 0: init_std = (1 / self.C / 3) ** 0.5     # init_std < 0: automated
