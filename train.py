@@ -108,8 +108,9 @@ def train_one_ep(ep: int, is_first_ep: bool, start_it: int, args: arg_util.Args,
         
         with torch.cuda.amp.autocast():
             trainer.train_step(
-                stepping=True, metric_lg=me, tb_lg=None,
-                inp_B3HW=inp, label_B=label, prog_si=-1, prog_wp_it=0
+                it=it, g_it=ep * len(ld_train) + it, stepping=True,
+                metric_lg=me, tb_lg=None, inp_B3HW=inp, label_B=label,
+                prog_si=-1, prog_wp_it=0
             )
     
     return {}
