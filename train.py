@@ -106,11 +106,11 @@ def train_one_ep(ep: int, is_first_ep: bool, start_it: int, args: arg_util.Args,
     for it, (inp, label) in enumerate(ld_train):
         inp, label = inp.to(args.device, non_blocking=True), label.to(args.device, non_blocking=True)
         
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast("cuda"):
             trainer.train_step(
                 it=it, g_it=ep * len(ld_train) + it, stepping=True,
                 metric_lg=me, tb_lg=None, inp_B3HW=inp, label_B=label,
-                prog_si=-1, prog_wp_it=0
+                prog_si=-1, prog_wp_it=max(1, args.pgwp * len(ld_train))
             )
     
     return {}
