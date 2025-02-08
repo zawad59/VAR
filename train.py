@@ -8,6 +8,7 @@ from functools import partial
 
 import torch
 from torch.utils.data import DataLoader
+from torch.optim import Adam  # Import Adam optimizer
 
 import dist
 from utils import arg_util, misc
@@ -72,11 +73,18 @@ def build_everything(args: arg_util.Args):
         init_adaln=args.aln, init_adaln_gamma=args.alng, init_head=args.hd, init_std=args.ini,
     )
 
-
+    # Create the base optimizer
     base_optimizer = Adam(var_wo_ddp.parameters(), lr=args.lr)
 
     # Wrap the base optimizer with AmpOptimizer
-    var_opt = AmpOptimizer(base_optimizer)
+    var_opt = AmpOptimizer(
+        mixed_precision=args.mixed_precision,  # Set this based on your args or config
+        optimizer=base_optimizer,
+        names=[name for name, param in var_wo_ddp.named_parameters() if param.requires_grad],
+        paras=[param for param in var_wo_ddp.parameters() if param.requires_grad],
+        grad_clip=args.grad_clip,  # Set this based on your args or config
+        n_gradient_accumulation=args.n_gradient_accumulation,  # Set this based on your args or config
+    )
 
     trainer = VARTrainer(
         device=args.device, patch_nums=args.patch_nums, resos=args.resos,
