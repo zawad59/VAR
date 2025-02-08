@@ -24,7 +24,12 @@ class VARTrainer(object):
         var_opt: AmpOptimizer, label_smooth: float,
     ):
         super(VARTrainer, self).__init__()
-        
+        self.device = device
+        self.patch_nums = patch_nums
+        self.resos = resos
+        self.var_wo_ddp = var_wo_ddp
+        self.var_opt = var_opt  # Ensure this is properly initialized
+        self.label_smooth = label_smooth
         self.var, self.vae_local, self.quantize_local = var, vae_local, vae_local.quantize
         self.quantize_local: VectorQuantizer2
         self.var_wo_ddp: VAR = var_wo_ddp  # after torch.compile
