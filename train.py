@@ -21,7 +21,6 @@ def adjust_batch_size(args):
     args.glb_batch_size = max(1, args.glb_batch_size // 2)
     print(f"[INFO] Adjusted batch sizes: global={args.glb_batch_size}, local={args.batch_size}")
 
-
 def build_everything(args: arg_util.Args):
     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     
@@ -60,19 +59,38 @@ def build_everything(args: arg_util.Args):
         num_classes = 1000
         ld_val = ld_train = None
     
-    return num_classes, ld_train, ld_val, start_ep, start_it
+    from models import VAR, VQVAE, build_vae_var
+    from trainer import VARTrainer
+    from utils.amp_sc import AmpOptimizer
+    from utils.lr_control import filter_params
+    
+    vae_local, var_wo_ddp = build_vae_var(
+        V=4096, Cvae=32, ch=160, share_quant_resi=4,
+        device=dist.get_device(), patch_nums=args.patch_nums,
+        num_classes=num_classes, depth=args.depth, shared_aln=args.saln, attn_l2_norm=args.anorm,
+        flash_if_available=args.fuse, fused_if_available=args.fuse,
+        init_adaln=args.aln, init_adaln_gamma=args.alng, init_head=args.hd, init_std=args.ini,
+    )
+    
+    trainer = VARTrainer(
+        device=args.device, patch_nums=args.patch_nums, resos=args.resos,
+        vae_local=vae_local, var_wo_ddp=var_wo_ddp, var=var_wo_ddp,
+        var_opt=None, label_smooth=args.ls,
+    )
+    
+    return num_classes, ld_train, ld_val, start_ep, start_it, trainer
 
 def main_training():
     args: arg_util.Args = arg_util.init_dist_and_get_args()
-    adjust_batch_size(args)  # Adjust batch size before training
+    adjust_batch_size(args)
     
-    num_classes, ld_train, ld_val, start_ep, start_it = build_everything(args)
+    num_classes, ld_train, ld_val, start_ep, start_it, trainer = build_everything(args)
     
     start_time = time.time()
     for ep in range(start_ep, args.ep):
-        torch.cuda.empty_cache()  # Free GPU memory at the start of each epoch
+        torch.cuda.empty_cache()
         
-        stats = train_one_ep(ep, ep == start_ep, start_it if ep == start_ep else 0, args, ld_train)
+        stats = train_one_ep(ep, ep == start_ep, start_it if ep == start_ep else 0, args, ld_train, trainer)
         
         print(f'[Epoch {ep}] Completed')
     
@@ -81,14 +99,11 @@ def main_training():
     gc.collect()
     torch.cuda.empty_cache()
 
-def train_one_ep(ep: int, is_first_ep: bool, start_it: int, args: arg_util.Args, ld_train):
-    from trainer import VARTrainer
-    trainer = VARTrainer()
-    
+def train_one_ep(ep: int, is_first_ep: bool, start_it: int, args: arg_util.Args, ld_train, trainer):
     for it, (inp, label) in enumerate(ld_train):
         inp, label = inp.to(args.device, non_blocking=True), label.to(args.device, non_blocking=True)
         
-        with torch.cuda.amp.autocast():  # Enable mixed precision training
+        with torch.cuda.amp.autocast():
             trainer.train_step(inp, label)
     
     return {}
