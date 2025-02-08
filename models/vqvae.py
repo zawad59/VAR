@@ -76,6 +76,16 @@ class VectorQuantizer2(nn.Module):
 
         return f_hat_or_idx_Bl
 
+    def idxBl_to_var_input(self, idx_Bl: List[torch.Tensor]) -> torch.Tensor:
+        """
+        Convert a list of indices (from quantization) into a format suitable for VAR input.
+        This method assumes that each element in idx_Bl is a tensor of shape (B, L),
+        where B is the batch size and L is the sequence length.
+        """
+        # Concatenate all indices along the sequence dimension
+        x_BLCv = torch.cat([idx.unsqueeze(-1) for idx in idx_Bl], dim=1)  # Shape: (B, L, 1)
+        return x_BLCv.float()  # Convert to Float for compatibility with VAR model
+
     def forward(self, f_BChw: torch.Tensor, ret_usages=False):
         B, C, H, W = f_BChw.shape
         f_no_grad = f_BChw.detach()
