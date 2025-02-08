@@ -1,7 +1,3 @@
-import math
-from functools import partial
-from typing import Optional, Tuple, Union
-
 import torch
 import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin
@@ -15,7 +11,7 @@ from models.vqvae import VQVAE, VectorQuantizer2
 class SharedAdaLin(nn.Linear):
     def forward(self, cond_BD):
         C = self.weight.shape[0] // 6
-        return super().forward(cond_BD).view(-1, 1, 6, C)   # B16C
+        return super().forward(cond_BD).view(-1, 1, 6, C) 
 
 
 class VAR(nn.Module):
