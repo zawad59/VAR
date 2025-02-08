@@ -132,7 +132,7 @@ class VectorQuantizer2(nn.Module):
         
         return ls_f_hat_BChw
     
-    def f_to_idxBl_or_fhat(
+   def f_to_idxBl_or_fhat(
     self, 
     f_BChw: torch.Tensor, 
     to_fhat: bool, 
