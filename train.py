@@ -78,12 +78,12 @@ def build_everything(args: arg_util.Args):
 
     # Wrap the base optimizer with AmpOptimizer
     var_opt = AmpOptimizer(
-        mixed_precision=args.mixed_precision,  # Set this based on your args or config
+        mixed_precision=args.fp16,  # Use args.fp16 for mixed precision
         optimizer=base_optimizer,
         names=[name for name, param in var_wo_ddp.named_parameters() if param.requires_grad],
         paras=[param for param in var_wo_ddp.parameters() if param.requires_grad],
-        grad_clip=args.grad_clip,  # Set this based on your args or config
-        n_gradient_accumulation=args.n_gradient_accumulation,  # Set this based on your args or config
+        grad_clip=args.tclip,  # Use args.tclip for gradient clipping
+        n_gradient_accumulation=args.ac,  # Use args.ac for gradient accumulation
     )
 
     trainer = VARTrainer(
