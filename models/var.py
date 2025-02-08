@@ -7,6 +7,7 @@ import dist
 from models.basic_var import AdaLNBeforeHead, AdaLNSelfAttn
 from models.helpers import gumbel_softmax_with_rng, sample_with_top_k_top_p_
 from models.vqvae import VQVAE, VectorQuantizer2
+from functools import partial
 
 
 class SharedAdaLin(nn.Linear):
