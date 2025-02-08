@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from huggingface_hub import PyTorchModelHubMixin
 from typing import Optional, Tuple, Union
+import math
 import dist
 from models.basic_var import AdaLNBeforeHead, AdaLNSelfAttn
 from models.helpers import gumbel_softmax_with_rng, sample_with_top_k_top_p_
