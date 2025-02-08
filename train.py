@@ -71,11 +71,17 @@ def build_everything(args: arg_util.Args):
         flash_if_available=args.fuse, fused_if_available=args.fuse,
         init_adaln=args.aln, init_adaln_gamma=args.alng, init_head=args.hd, init_std=args.ini,
     )
-    
+
+
+    base_optimizer = Adam(var_wo_ddp.parameters(), lr=args.lr)
+
+    # Wrap the base optimizer with AmpOptimizer
+    var_opt = AmpOptimizer(base_optimizer)
+
     trainer = VARTrainer(
         device=args.device, patch_nums=args.patch_nums, resos=args.resos,
         vae_local=vae_local, var_wo_ddp=var_wo_ddp, var=var_wo_ddp,
-        var_opt=None, label_smooth=args.ls,
+        var_opt=var_opt, label_smooth=args.ls,  # Pass the AmpOptimizer here
     )
     
     return num_classes, ld_train, ld_val, start_ep, start_it, trainer
