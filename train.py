@@ -74,7 +74,7 @@ def build_everything(args: arg_util.Args):
     )
 
     # Create the base optimizer
-    base_optimizer = Adam(var_wo_ddp.parameters(), lr=args.lr)
+    base_optimizer = Adam(var_wo_ddp.parameters(), lr=args.tlr)
 
     # Wrap the base optimizer with AmpOptimizer
     var_opt = AmpOptimizer(
