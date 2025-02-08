@@ -2,10 +2,93 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .basic_vae import Decoder, Encoder
-from .quant import VectorQuantizer2
 
+class VectorQuantizer2(nn.Module):
+    def __init__(
+        self, vocab_size, Cvae, using_znorm=False, beta=0.25, default_qresi_counts=0,
+        v_patch_nums=(1, 2, 3, 4, 5, 6, 8, 10, 13, 16), quant_resi=0.5, share_quant_resi=4
+    ):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.Cvae = Cvae
+        self.using_znorm = using_znorm
+        self.beta = beta
+        self.v_patch_nums = v_patch_nums
+        self.quant_resi = quant_resi
+        self.share_quant_resi = share_quant_resi
+
+        self.embedding = nn.Embedding(self.vocab_size, self.Cvae)
+        self.embedding.weight.data.uniform_(-1.0 / self.vocab_size, 1.0 / self.vocab_size)
+
+    def f_to_idxBl_or_fhat(
+        self, f_BChw: torch.Tensor, to_fhat: bool, v_patch_nums: Optional[Sequence[Union[int, Tuple[int, int]]]] = None
+    ) -> List[Union[torch.Tensor, torch.LongTensor]]:
+        B, C, H, W = f_BChw.shape
+        f_no_grad = f_BChw.detach()
+        f_rest = f_no_grad.clone()
+        f_hat = torch.zeros_like(f_rest)
+
+        f_hat_or_idx_Bl: List[torch.Tensor] = []
+
+        patch_hws = [
+            (pn, pn) if isinstance(pn, int) else (pn[0], pn[1])
+            for pn in (v_patch_nums or self.v_patch_nums)
+        ]  # from small to large
+
+        assert patch_hws[-1][0] == H and patch_hws[-1][1] == W, f'{patch_hws[-1]=} != ({H=}, {W=})'
+
+        SN = len(patch_hws)
+        for si, (ph, pw) in enumerate(patch_hws):  # from small to large
+            if si != SN - 1:
+                z_NC = F.interpolate(f_rest, size=(ph, pw), mode='area').permute(0, 2, 3, 1).reshape(-1, C)
+            else:
+                z_NC = f_rest.permute(0, 2, 3, 1).reshape(-1, C)
+
+            # Ensure z_NC and embedding weight have the same data type
+            z_NC = z_NC.float()  # Convert z_NC to Float
+            embedding_weight_T = self.embedding.weight.data.T.float()  # Convert embedding weight to Float
+
+            if self.using_znorm:
+                z_NC = F.normalize(z_NC, dim=-1)
+                idx_N = torch.argmax(z_NC @ F.normalize(embedding_weight_T, dim=0), dim=1)
+            else:
+                d_no_grad = (
+                    torch.sum(z_NC.square(), dim=1, keepdim=True)
+                    + torch.sum(self.embedding.weight.data.square(), dim=1, keepdim=False)
+                )
+                d_no_grad.addmm_(z_NC, embedding_weight_T, alpha=-2, beta=1)  # (B*h*w, vocab_size)
+                idx_N = torch.argmin(d_no_grad, dim=1)
+
+            idx_Bhw = idx_N.view(B, ph, pw)
+            if si != SN - 1:
+                h_BChw = F.interpolate(
+                    self.embedding(idx_Bhw).permute(0, 3, 1, 2), size=(H, W), mode='bicubic'
+                ).contiguous()
+            else:
+                h_BChw = self.embedding(idx_Bhw).permute(0, 3, 1, 2).contiguous()
+
+            f_hat.add_(h_BChw)
+            f_rest.sub_(h_BChw)
+            f_hat_or_idx_Bl.append(f_hat.clone() if to_fhat else idx_N.reshape(B, ph * pw))
+
+        return f_hat_or_idx_Bl
+
+    def forward(self, f_BChw: torch.Tensor, ret_usages=False):
+        B, C, H, W = f_BChw.shape
+        f_no_grad = f_BChw.detach()
+        f_rest = f_no_grad.clone()
+        f_hat = torch.zeros_like(f_rest)
+
+        f_hat_or_idx_Bl = self.f_to_idxBl_or_fhat(f_BChw, to_fhat=True)
+
+        if ret_usages:
+            usages = torch.bincount(f_hat_or_idx_Bl[-1].flatten(), minlength=self.vocab_size)
+            return f_hat, usages, torch.tensor(0.0)  # Placeholder for vq_loss
+        else:
+            return f_hat, torch.tensor(0.0)  # Placeholder for vq_loss
 
 class VQVAE(nn.Module):
     def __init__(
@@ -47,7 +130,6 @@ class VQVAE(nn.Module):
     
     # ===================== `forward` is only used in VAE training =====================
     def forward(self, inp, ret_usages=False):   # -> rec_B3HW, idx_N, loss
-        VectorQuantizer2.forward
         f_hat, usages, vq_loss = self.quantize(self.quant_conv(self.encoder(inp)), ret_usages=ret_usages)
         return self.decoder(self.post_quant_conv(f_hat)), usages, vq_loss
     # ===================== `forward` is only used in VAE training =====================
