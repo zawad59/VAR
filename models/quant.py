@@ -132,13 +132,7 @@ class VectorQuantizer2(nn.Module):
         
         return ls_f_hat_BChw
     
-   def f_to_idxBl_or_fhat(
-    self, 
-    f_BChw: torch.Tensor, 
-    to_fhat: bool, 
-    v_patch_nums: Optional[Sequence[Union[int, Tuple[int, int]]]] = None
-) -> List[Union[torch.Tensor, torch.LongTensor]]:
-    
+   def f_to_idxBl_or_fhat(self, f_BChw: torch.Tensor, to_fhat: bool, v_patch_nums: Optional[Sequence[Union[int, Tuple[int, int]]]] = None) -> List[Union[torch.Tensor, torch.LongTensor]]:
     B, C, H, W = f_BChw.shape
     f_no_grad = f_BChw.detach()
     f_rest = f_no_grad.clone()
